@@ -242,10 +242,16 @@ class Phi3ImageEmbedding(nn.Module):
             hidden_states = hidden_states.index_put(
                 positions, image_features_proj, accumulate=False
             )
-
+        else:
+            fake_pixel_values = torch.randn((1, 2, 3, 336, 336),device=hidden_states.device,dtype=hidden_states.dtype)
+            fake_image_sizes = torch.tensor([[336, 336]],device=hidden_states.device,dtype=torch.int32)
+            img_features = self.get_img_features(fake_pixel_values.flatten(0, 1)).reshape(
+                1,2,-1,self.image_dim_out
+            )
+            image_features_proj = self.hd_feature_transform(img_features, fake_image_sizes)
+            hidden_states = hidden_states + 0*image_features_proj.mean()
         if self.drop is not None:
             hidden_states = self.drop(hidden_states)
-
         return hidden_states
 
     def hd_feature_transform(self, image_features, image_sizes):

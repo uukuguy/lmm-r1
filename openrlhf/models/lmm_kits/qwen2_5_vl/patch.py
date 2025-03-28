@@ -23,6 +23,12 @@ class Qwen2_5_VLPatch(BasePatch):
 
                 image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
                 inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
+            else:
+                fake_pixel_values = torch.zeros((16, 1176),device=inputs_embeds.device,dtype=self.visual.dtype)
+                fake_image_grid_thw = torch.tensor([[1, 4, 4]],device=inputs_embeds.device,dtype=torch.int32)
+                image_embeds = self.visual(fake_pixel_values, grid_thw=fake_image_grid_thw)
+                image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+                inputs_embeds = inputs_embeds + 0*image_embeds.mean()
 
             if pixel_values_videos is not None:
                 pixel_values_videos = pixel_values_videos.type(self.visual.dtype)
