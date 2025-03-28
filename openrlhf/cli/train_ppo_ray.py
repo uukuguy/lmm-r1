@@ -95,6 +95,7 @@ def train(args):
             pg if args.colocate_all_models else None,
             args.vllm_gpu_memory_utilization,
             args.vllm_enable_sleep,
+            limit_mm_per_prompt=args.limit_mm_per_prompt
         )
 
     actor_model = PPORayActorGroup(
@@ -248,6 +249,7 @@ if __name__ == "__main__":
         default=0.9,
         help="vLLM gpu_memory_utilization",
     )
+    parser.add_argument("--limit_mm_per_prompt", type=str, default=None, help="Limit the number of multimodal inputs per prompt")
 
     # Checkpoints
     parser.add_argument("--eval_steps", type=int, default=-1)
@@ -482,5 +484,15 @@ if __name__ == "__main__":
         args.processor_kwargs["max_pixels"] = args.processor_kwargs.get("max_pixels", 16384 * 28 * 28)
     else:
         args.processor_kwargs = {"min_pixels": 4 * 28 * 28, "max_pixels": 16384 * 28 * 28}
+    
+    if args.limit_mm_per_prompt:
+        import json
+        try:
+            args.limit_mm_per_prompt = json.loads(args.limit_mm_per_prompt)
+        except json.JSONDecodeError:
+            raise ValueError(f"Invalid Json string for --limit_mm_per_prompt: {args.limit_mm_per_prompt}")
+    else:
+        args.limit_mm_per_prompt = {"image": 1}
+
 
     train(args)
