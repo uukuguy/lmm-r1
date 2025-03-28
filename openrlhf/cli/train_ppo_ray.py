@@ -301,6 +301,7 @@ if __name__ == "__main__":
     # PPO
     parser.add_argument("--save_path", type=str, default="./ckpt")
     parser.add_argument("--num_episodes", type=int, default=1)
+    parser.add_argument("--max_steps", type=int, default=None, help="Max steps for PPO training. This will override num_episodes if set. Useful for dynamic sampling, which needs multiple rollouts for one training stage.")
     parser.add_argument("--rollout_batch_size", type=int, default=1024)
     parser.add_argument("--micro_rollout_batch_size", type=int, default=8)
     parser.add_argument("--max_epochs", type=int, default=1)

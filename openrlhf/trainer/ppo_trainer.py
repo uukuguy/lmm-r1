@@ -201,15 +201,9 @@ class PPOTrainer(ABC):
         prompts_dataloader,
         pretrain_dataloader,
         consumed_samples=0,
-        num_update_steps_per_episodes=1,
+        num_rollouts_per_episodes=1,
+        trained_steps=0,
     ) -> None:
-        num_rollouts_per_episodes = (
-            num_update_steps_per_episodes
-            * args.train_batch_size
-            // args.max_epochs
-            // args.rollout_batch_size
-            // args.n_samples_per_prompt
-        )
 
         # get eval and save steps
         if args.eval_steps == -1:
@@ -221,22 +215,25 @@ class PPOTrainer(ABC):
         self.pretrain_dataloader = pretrain_dataloader
 
         # Restore step and start_epoch
-        steps = consumed_samples // args.rollout_batch_size + 1
+        steps = trained_steps + 1
+        total_consumed_samples = consumed_samples
         start_episode = consumed_samples // args.rollout_batch_size // num_rollouts_per_episodes
         consumed_samples = consumed_samples % (num_rollouts_per_episodes * args.rollout_batch_size)
-
-        for episode in range(start_episode, args.num_episodes):
+        episode = start_episode
+        pbar = tqdm(
+            range(args.max_steps),
+            desc=f"Steps [Episode {episode+1}]",
+            disable=not self.strategy.is_rank_0(),
+            initial=steps-1,
+        )
+        while steps <= args.max_steps:
             if isinstance(self.prompts_dataloader.sampler, DistributedSampler):
                 self.prompts_dataloader.sampler.set_epoch(
                     episode, consumed_samples=0 if episode > start_episode else consumed_samples
                 )
-            pbar = tqdm(
-                range(self.prompts_dataloader.__len__()),
-                desc=f"Episode [{episode + 1}/{args.num_episodes}]",
-                disable=not self.strategy.is_rank_0(),
-            )
 
             for rand_prompts, labels in self.prompts_dataloader:
+                total_consumed_samples += len(rand_prompts)
                 for i, experience in enumerate(
                     self.experience_maker.make_experience_list(rand_prompts, labels, **self.generate_kwargs)
                 ):
@@ -257,11 +254,14 @@ class PPOTrainer(ABC):
                 pbar.set_postfix(status)
 
                 # logs/checkpoints
-                client_states = {"consumed_samples": steps * args.rollout_batch_size}
+                client_states = {"consumed_samples": total_consumed_samples, "trained_steps": steps}
                 self.save_logs_and_checkpoints(args, steps, pbar, status, client_states)
 
                 pbar.update()
                 steps = steps + 1
+
+            episode = episode + 1
+            pbar.set_description(f"Steps [Episode {episode+1}]")
 
         if self._wandb is not None and self.strategy.is_rank_0():
             self._wandb.finish()

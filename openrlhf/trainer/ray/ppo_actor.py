@@ -412,10 +412,24 @@ class ActorModelRayActor(BasePPORole):
         self.prepare_datasets()
 
         # configure scheduler
-        self.num_update_steps_per_episodes = (
+        num_update_steps_per_episodes = (
             len(self.prompts_dataset) * args.n_samples_per_prompt // args.train_batch_size * args.max_epochs
         )
-        max_steps = math.ceil(args.num_episodes * self.num_update_steps_per_episodes)
+        self.num_rollouts_per_episodes = (
+            num_update_steps_per_episodes
+            * args.train_batch_size
+            // args.max_epochs
+            // args.rollout_batch_size
+            // args.n_samples_per_prompt
+        )
+        if args.max_steps is None:
+            # If args.max_steps is not set, we use num_episodes to calculate max_steps
+            # For dynamic sampling, we need multiple rollouts for one training stage.
+            # In this case, max_steps is not the real training steps of actor model, and you should set args.max_steps explicitly.
+            max_steps = math.ceil(args.num_episodes * num_update_steps_per_episodes)
+            args.max_steps = max_steps
+        else:
+            max_steps = args.max_steps
         self._max_steps = max_steps
 
         actor_scheduler = get_scheduler(
@@ -445,11 +459,13 @@ class ActorModelRayActor(BasePPORole):
 
         # load checkpoint
         self.consumed_samples = 0
+        self.trained_steps = 0
         ckpt_path = os.path.join(args.ckpt_path, "_actor")
         if args.load_checkpoint and os.path.exists(ckpt_path):
             _, states = strategy.load_ckpt(self.actor.model, ckpt_path)
             self.consumed_samples = states["consumed_samples"]
-            strategy.print(f"Loaded the checkpoint: {ckpt_path}, consumed_samples: {self.consumed_samples}")
+            self.trained_steps = states["trained_steps"]
+            strategy.print(f"Loaded the checkpoint: {ckpt_path}, consumed_samples: {self.consumed_samples}, trained_steps: {self.trained_steps}")
 
         # initial offload
         if strategy.args.deepspeed_enable_sleep:
@@ -601,7 +617,8 @@ class ActorModelRayActor(BasePPORole):
             self.prompts_dataloader,
             self.pretrain_dataloader,
             self.consumed_samples,
-            self.num_update_steps_per_episodes,
+            self.num_rollouts_per_episodes,
+            self.trained_steps,
         )
 
     def save_model(self):
