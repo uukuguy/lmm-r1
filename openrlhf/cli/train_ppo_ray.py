@@ -304,6 +304,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_steps", type=int, default=None, help="Max steps for PPO training. This will override num_episodes if set. Useful for dynamic sampling, which needs multiple rollouts for one training stage.")
     parser.add_argument("--rollout_batch_size", type=int, default=1024)
     parser.add_argument("--micro_rollout_batch_size", type=int, default=8)
+    parser.add_argument("--store_extra_buffers", action="store_true", default=False, help="Store extra buffers in replay buffer for oversampling.")
     parser.add_argument("--max_epochs", type=int, default=1)
     parser.add_argument("--prompt_max_len", type=int, default=1024, help="Max tokens for each prompt")
     parser.add_argument("--generate_max_len", type=int, default=1024, help="Max tokens to generate in PPO")

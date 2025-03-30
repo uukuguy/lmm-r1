@@ -166,6 +166,7 @@ class PPOTrainer(ABC):
             micro_train_batch_size, self.data_processor, buffer_limit, buffer_cpu_offload, packing_samples,
             drop_maxlen=self.args.drop_maxlen, 
             maxlen=self.args.generate_max_len + prompt_max_len,
+            store_extra_buffers=self.args.store_extra_buffers,
         )
 
         # wandb/tensorboard setting
@@ -217,6 +218,7 @@ class PPOTrainer(ABC):
 
         self.prompts_dataloader = prompts_dataloader
         self.pretrain_dataloader = pretrain_dataloader
+        self.replay_buffer.set_limit(prompts_dataloader.batch_size * args.n_samples_per_prompt)
 
         # Restore step and start_epoch
         steps = trained_steps + 1
@@ -248,10 +250,16 @@ class PPOTrainer(ABC):
                         self.strategy.print(output)
                     self.replay_buffer.append(experience)
 
+                if not self.replay_buffer.full():
+                    self.strategy.print(f"Replay buffer space: {len(self.replay_buffer)}/{self.replay_buffer.limit}. Continue to sample more data.")
+                    continue
+
                 if self.args.advantage_estimator != "group_norm":
                     self.replay_buffer.normalize("advantages", self.strategy)
                 status = self.ppo_train(steps)
                 self.replay_buffer.clear()
+                if args.store_extra_buffers:
+                    self.strategy.print(f"Replay buffer space: {len(self.replay_buffer)}/{self.replay_buffer.limit}. Stored buffers are used after clearing.")
 
                 if "kl" in status:
                     self.kl_ctl.update(status["kl"], args.rollout_batch_size * args.n_samples_per_prompt)
