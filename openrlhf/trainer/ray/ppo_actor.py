@@ -60,6 +60,7 @@ class ActorPPOTrainer(PPOTrainer):
             self.reward_fn,
             vllm_engines=self.vllm_engines,
             packing_samples=self.strategy.args.packing_samples,
+            custom_experience_filter=self.custom_experience_filter,
         )
 
         backend = getattr(self.strategy.args, "vllm_sync_backend", "nccl")
@@ -544,6 +545,7 @@ class ActorModelRayActor(BasePPORole):
         reward_model: List[ray.actor.ActorHandle],
         remote_rm_url: List[str] = None,
         reward_fn: Callable[[List[torch.Tensor]], torch.Tensor] = None,
+        custom_experience_filter:str=None,
         vllm_engines: List[ray.actor.ActorHandle] = None,
         critic_train_remote: bool = False,
     ):
@@ -565,6 +567,7 @@ class ActorModelRayActor(BasePPORole):
             critic_scheduler=None,
             remote_rm_url=remote_rm_url,
             reward_fn=reward_fn,
+            custom_experience_filter=custom_experience_filter,
             vllm_engines=vllm_engines,
             max_epochs=args.max_epochs,
             micro_train_batch_size=args.micro_train_batch_size,

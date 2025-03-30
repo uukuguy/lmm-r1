@@ -179,7 +179,7 @@ def train(args):
 
     # train actor and critic model
     refs = actor_model.async_fit_actor_model(
-        critic_model, ref_model, reward_models, args.remote_rm_url, reward_fn=reward_fn, vllm_engines=vllm_engines
+        critic_model, ref_model, reward_models, args.remote_rm_url, reward_fn=reward_fn, custom_experience_filter=args.custom_experience_filter, vllm_engines=vllm_engines
     )
     ray.get(refs)
 
@@ -383,7 +383,7 @@ if __name__ == "__main__":
     parser.add_argument("--critic_pretrain", type=str, default=None, help="HF model name or path")
     parser.add_argument("--value_head_prefix", type=str, default="score")
     parser.add_argument("--ref_reward_offload", action="store_true", default=False)
-
+    parser.add_argument("--custom_experience_filter", type=str, default=None, help="Custom experience filter")
     # Custom dataset
     parser.add_argument("--prompt_data", type=str, default=None, help="HF dataset name or path")
     parser.add_argument(

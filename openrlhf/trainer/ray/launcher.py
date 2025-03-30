@@ -274,6 +274,7 @@ class PPORayActorGroup:
         reward_model_groups: List["PPORayActorGroup"],
         remote_rm_urls: List[str] = None,
         reward_fn: Callable[[List[torch.Tensor]], torch.Tensor] = None,
+        custom_experience_filter:str=None,
         vllm_engines: List = None,
     ):
         """Train actor model.
@@ -284,6 +285,7 @@ class PPORayActorGroup:
             reward_model_groups (PPORayActorGroup): reward model groups.
             remote_rm_urls: remote RM APIs.
             reward_fn: reward calculate function, must be specified if using multiple reward models.
+            custom_experience_filter: custom experience filter for filtering experiences.
             vllm_engines: vllm engines for text generation, if not specified, generate text by actor model directly.
 
         Returns:
@@ -318,6 +320,7 @@ class PPORayActorGroup:
                     reward_model=reward_actors,
                     remote_rm_url=remote_rm_urls,
                     reward_fn=reward_fn,
+                    custom_experience_filter=custom_experience_filter,
                     vllm_engines=vllm_engines,
                     # whether this actor should triger corresponding critic model training
                     critic_train_remote=(i < len(critic_actors)) if critic_actor else None,
