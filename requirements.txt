@@ -4,12 +4,14 @@ datasets
 deepspeed==0.16.4
 einops
 flask
+flash-attn==2.7.4.post1
 isort
 jsonlines
 loralib
 math-verify==0.5.2
 levenshtein
 optimum
+optree>=0.13.0
 packaging
 peft
 pynvml>=12.0.0
