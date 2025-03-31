@@ -185,6 +185,7 @@ class NaiveReplayBuffer(ABC):
         packing_samples: bool = False,
         drop_maxlen: bool = False,
         maxlen: int = 10**8,
+        store_extra_buffers: bool = False,
     ) -> None:
         super().__init__()
         self.sample_batch_size = sample_batch_size
@@ -197,6 +198,8 @@ class NaiveReplayBuffer(ABC):
         self.items: List[BufferItem] = []
         self.maxlen = maxlen
         self.drop_maxlen = drop_maxlen
+        self.store_extra_buffers = store_extra_buffers
+        self.extra_buffers: List[BufferItem] = []
 
     @torch.no_grad()
     def append(self, experience: Experience) -> None:
@@ -214,12 +217,18 @@ class NaiveReplayBuffer(ABC):
             items = remove_padding_in_sequences(items)
         self.items.extend(items)
         if self.limit > 0:
-            samples_to_remove = len(self.items) - self.limit
-            if samples_to_remove > 0:
-                self.items = self.items[samples_to_remove:]
+            num_samples_to_remove = max(0, len(self.items) - self.limit)
+            samples_to_remove = self.items[:num_samples_to_remove]
+            self.items = self.items[num_samples_to_remove:]
+            if self.store_extra_buffers:
+                self.extra_buffers.extend(samples_to_remove)
 
     def clear(self) -> None:
         self.items.clear()
+        if self.store_extra_buffers:
+            self.items.extend(self.extra_buffers[:self.limit])
+            #TODO: whether to drop too old buffers?
+            self.extra_buffers = self.extra_buffers[self.limit:]
 
     @torch.no_grad()
     def sample(self) -> Experience:
@@ -272,3 +281,9 @@ class NaiveReplayBuffer(ABC):
 
         for i, item in enumerate(self):
             setattr(item, attribute, (items[i] - mean) * rstd + 1e-8)
+
+    def set_limit(self, limit: int) -> None:
+        self.limit = limit
+    
+    def full(self) -> bool:
+        return len(self.items) >= self.limit
