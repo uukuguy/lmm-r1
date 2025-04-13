@@ -808,7 +808,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 ring_rank0 = [
                     i * self.strategy.ring_attn_size for i in range(world_size // self.strategy.ring_attn_size)
                 ]
-                self.ring_rank0_group = dist.new_group(ranks=ring_rank0)
+                self.ring_rank0_group = dist.new_group(ranks=ring_rank0,timeout=timedelta(minutes=60))
             dist.barrier(group=self.ring_rank0_group)
         else:
             dist.barrier()
