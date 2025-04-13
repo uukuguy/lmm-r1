@@ -125,10 +125,12 @@ def log_probs_from_logits(logits: torch.Tensor, labels: torch.Tensor, temperatur
     return log_probs_labels
 
 
-def masked_mean(tensor: torch.Tensor, mask: Optional[torch.Tensor], dim: int = None) -> torch.Tensor:
+def masked_mean(tensor: torch.Tensor, mask: Optional[torch.Tensor], dim: int = None, normalizer: float = None) -> torch.Tensor:
     if mask is None:
         return tensor.mean(axis=dim)
-    return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
+    result = (tensor * mask).sum(axis=dim)
+    normalizer = normalizer if normalizer is not None else mask.sum(axis=dim)
+    return result / normalizer
 
 
 def masked_normalize(tensor: torch.Tensor, mask: torch.Tensor, dim: int = 1, eps: float = 1e-8) -> torch.Tensor:

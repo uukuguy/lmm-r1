@@ -374,6 +374,7 @@ if __name__ == "__main__":
         default=False,
         help="disable dividing by std for advantages while keeping mean normalization",
     )
+    parser.add_argument("--norm_loss_by_max_len", action="store_true", default=False, help="Normalize loss by max length")
 
     # Context Parallel
     parser.add_argument("--ring_attn_size", type=int, default=1, help="Ring attention group size")

@@ -126,7 +126,10 @@ class BasePPOTrainer(ABC):
         self.actor_scheduler = actor_scheduler
         self.critic_scheduler = critic_scheduler
 
-        self.actor_loss_fn = PolicyLoss(eps_clip)
+        self.actor_loss_fn = PolicyLoss(
+            eps_clip, 
+            normalizer=generate_kwargs["max_new_tokens"] if self.args.norm_loss_by_max_len else None
+        )
         self.critic_loss_fn = ValueLoss(value_clip)
         self.ptx_loss_fn = GPTLMLoss()
 
