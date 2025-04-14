@@ -88,6 +88,7 @@ def train(args):
             args.vllm_tensor_parallel_size,
             args.pretrain,
             args.seed,
+            args.full_determinism,
             args.enable_prefix_caching,
             args.enforce_eager,
             max_len,
@@ -357,7 +358,6 @@ if __name__ == "__main__":
     parser.add_argument("--freeze_prefix", type=str, nargs="+", default=None,
         help="List of parameter name prefixes to freeze during training"
     )
-    parser.add_argument("--drop_maxlen", action="store_true", default=False)
     parser.add_argument("--processor_kwargs",type=str,default=None,help="Processor kwargs. Should be a json string. There are always two keys: min_pixels and max_pixels, which are the minimum and maximum number of pixels for the image. If not provided, the default values are 4*28*28 and 16384*28*28 respectively.")
     # Reinforce
     parser.add_argument(
@@ -374,7 +374,6 @@ if __name__ == "__main__":
         default=False,
         help="disable dividing by std for advantages while keeping mean normalization",
     )
-    parser.add_argument("--norm_loss_by_max_len", action="store_true", default=False, help="Normalize loss by max length")
 
     # Context Parallel
     parser.add_argument("--ring_attn_size", type=int, default=1, help="Ring attention group size")
