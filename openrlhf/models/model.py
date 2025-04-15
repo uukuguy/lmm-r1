@@ -11,7 +11,6 @@ from transformers.integrations.deepspeed import HfDeepSpeedConfig
 from openrlhf.utils.logging_utils import init_logger
 
 from .ring_attn_utils import set_hacked_position_ids, clear_hacked_position_ids
-from .utils import reset_position_ids
 from openrlhf.models.lmm_kits.utils import get_generation_cls, smart_load_config
 from .ring_attn_utils import gather_and_pad_tensor, unpad_and_slice_tensor
 
