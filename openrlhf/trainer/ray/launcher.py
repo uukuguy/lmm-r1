@@ -1,13 +1,14 @@
 import logging
 import os
 import socket
-from typing import Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 
 import ray
 import torch
 import torch.distributed as dist
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from tqdm import tqdm
 
 from openrlhf.models import Actor, get_llm_for_sequence_regression
 from openrlhf.trainer.ray.utils import ray_noset_visible_devices
@@ -60,6 +61,38 @@ class BasePPORole(DistributedTorchRayActor):
     def init_model_from_pretrained(self, *args, **kwargs):
         raise NotImplementedError()
 
+    def forward_batch(
+        self,
+        **kwargs,
+    ) -> List[Any]:
+        """Process input data by calling forward function for each item in the lists.
+
+        Args:
+            **kwargs: Input parameters in list format. Each parameter should be a list with same length.
+                     The first parameter's length determines the number of forward calls.
+
+        Returns:
+            List[Any]: List of results from forward function
+        """
+        # Get the first parameter to determine list length
+        first_param = next(iter(kwargs.values()))
+        list_length = len(first_param)
+
+        # Verify all parameters have same length
+        for param_name, param_value in kwargs.items():
+            if len(param_value) != list_length:
+                raise ValueError(f"Parameter {param_name} has length {len(param_value)}, expected {list_length}")
+
+        results = []
+        for i in tqdm(range(list_length), desc="Inference", disable=not self.strategy.is_rank_0()):
+            # Create kwargs for single item
+            sample_kwargs = {param_name: param_value[i] for param_name, param_value in kwargs.items()}
+
+            result = self.forward(**sample_kwargs)
+            results.append(result)
+
+        return results
+
 
 @ray.remote(num_gpus=1)
 class ReferenceModelRayActor(BasePPORole):
@@ -86,10 +119,9 @@ class ReferenceModelRayActor(BasePPORole):
     def forward(
         self,
         sequences: torch.LongTensor,
-        num_actions: int = None,
+        action_mask: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         return_output=False,
-        logps_allgather=False,
         packed_seq_lens: Optional[list[int]] = None,
         visual_inputs: Optional[dict] = None,
     ) -> torch.Tensor:
@@ -100,11 +132,9 @@ class ReferenceModelRayActor(BasePPORole):
             visual_inputs = {k:v.to(device) for k,v in visual_inputs.items()}
             log_probs = self.model(
                 sequences.to(device),
-                num_actions,
+                action_mask.to(device),
                 attention_mask.to(device),
-                return_output=return_output,
                 ring_attn_group=self.strategy.ring_attn_group,
-                logps_allgather=logps_allgather,
                 packed_seq_lens=packed_seq_lens,
                 visual_inputs=visual_inputs,
             )
@@ -274,6 +304,7 @@ class PPORayActorGroup:
         reward_model_groups: List["PPORayActorGroup"],
         remote_rm_urls: List[str] = None,
         reward_fn: Callable[[List[torch.Tensor]], torch.Tensor] = None,
+        custom_experience_filter:str=None,
         vllm_engines: List = None,
     ):
         """Train actor model.
@@ -284,6 +315,7 @@ class PPORayActorGroup:
             reward_model_groups (PPORayActorGroup): reward model groups.
             remote_rm_urls: remote RM APIs.
             reward_fn: reward calculate function, must be specified if using multiple reward models.
+            custom_experience_filter: custom experience filter for filtering experiences.
             vllm_engines: vllm engines for text generation, if not specified, generate text by actor model directly.
 
         Returns:
@@ -318,6 +350,7 @@ class PPORayActorGroup:
                     reward_model=reward_actors,
                     remote_rm_url=remote_rm_urls,
                     reward_fn=reward_fn,
+                    custom_experience_filter=custom_experience_filter,
                     vllm_engines=vllm_engines,
                     # whether this actor should triger corresponding critic model training
                     critic_train_remote=(i < len(critic_actors)) if critic_actor else None,

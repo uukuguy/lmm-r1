@@ -113,11 +113,8 @@ def make_experience_batch(items: List[BufferItem], data_processor: Optional[Base
     )
     for key in keys:
         vals = [getattr(item, key) for item in items]
-        if not packing_samples:
-            batch_data = zero_pad_sequences(vals, "left") if vals[0] is not None else None
-        else:
-            batch_data = vals if vals[0] is not None else None
-        kwargs[key] = batch_data
+        vals = torch.stack(vals, dim=0) if vals[0] is not None else None
+        kwargs[key] = vals
 
     kwargs["info"] = {}
     for key in items[0].info.keys():
@@ -185,6 +182,7 @@ class NaiveReplayBuffer(ABC):
         packing_samples: bool = False,
         drop_maxlen: bool = False,
         maxlen: int = 10**8,
+        store_extra_buffers: bool = False,
     ) -> None:
         super().__init__()
         self.sample_batch_size = sample_batch_size
@@ -197,29 +195,28 @@ class NaiveReplayBuffer(ABC):
         self.items: List[BufferItem] = []
         self.maxlen = maxlen
         self.drop_maxlen = drop_maxlen
+        self.store_extra_buffers = store_extra_buffers
+        self.extra_buffers: List[BufferItem] = []
 
     @torch.no_grad()
     def append(self, experience: Experience) -> None:
         if self.cpu_offload:
             experience.to_device(torch.device("cpu"))
-        items = split_experience_batch(experience, self.data_processor)
-        # NOTE: No tested
-        if self.drop_maxlen:
-            original_len = len(items)
-            items = list(filter(lambda x: x.sequences.shape[-1] <= self.maxlen, items))
-            if original_len - len(items) > 0:
-                print(f"drop {original_len - len(items)} samples")
-        # the packed samples comes with no padding
-        if not self.packing_samples:
-            items = remove_padding_in_sequences(items)
+        items = split_experience_batch(experience,self.data_processor)
         self.items.extend(items)
         if self.limit > 0:
-            samples_to_remove = len(self.items) - self.limit
-            if samples_to_remove > 0:
-                self.items = self.items[samples_to_remove:]
+            num_samples_to_remove = max(0, len(self.items) - self.limit)
+            samples_to_remove = self.items[:num_samples_to_remove]
+            self.items = self.items[num_samples_to_remove:]
+            if self.store_extra_buffers:
+                self.extra_buffers.extend(samples_to_remove)
 
     def clear(self) -> None:
         self.items.clear()
+        if self.store_extra_buffers:
+            self.items.extend(self.extra_buffers[:self.limit])
+            #TODO: whether to drop too old buffers?
+            self.extra_buffers = self.extra_buffers[self.limit:]
 
     @torch.no_grad()
     def sample(self) -> Experience:
@@ -239,7 +236,7 @@ class NaiveReplayBuffer(ABC):
         experience = make_experience_batch(batch, self.data_processor, self.packing_samples)
         return experience
 
-    def normalize(self, attribute: str, strategy) -> None:
+    def normalize(self, strategy, attribute: str, divide_by_std: bool = True) -> None:
         assert attribute == "advantages"
         items = []
         action_masks = []
@@ -249,13 +246,8 @@ class NaiveReplayBuffer(ABC):
 
         items_vector = torch.cat(items).float().flatten()
 
-        if action_masks[0] is None:
-            # packing samples has no action mask
-            action_masks_vector = 1
-            num_actions = items_vector.numel()
-        else:
-            action_masks_vector = torch.cat(action_masks).flatten()
-            num_actions = action_masks_vector.sum()
+        action_masks_vector = torch.cat(action_masks).flatten()
+        num_actions = action_masks_vector.sum()
 
         # for DP
         # mean
@@ -263,9 +255,18 @@ class NaiveReplayBuffer(ABC):
         all_sum, all_count = strategy.all_reduce(sum_and_count, "sum")
         mean = all_sum / all_count
         # std
-        std = ((items_vector - mean).pow(2) * action_masks_vector).sum()
-        all_std = strategy.all_reduce(std, "sum")
-        rstd = (all_std / all_count).clamp(min=1e-8).rsqrt()
+        if divide_by_std:
+            std = ((items_vector - mean).pow(2) * action_masks_vector).sum()
+            all_std = strategy.all_reduce(std, "sum")
+            rstd = (all_std / all_count).clamp(min=1e-8).rsqrt()
+        else:
+            rstd = 1
 
         for i, item in enumerate(self):
             setattr(item, attribute, (items[i] - mean) * rstd + 1e-8)
+
+    def set_limit(self, limit: int) -> None:
+        self.limit = limit
+    
+    def full(self) -> bool:
+        return len(self.items) >= self.limit

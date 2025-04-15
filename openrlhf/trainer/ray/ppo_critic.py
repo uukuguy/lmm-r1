@@ -9,7 +9,8 @@ from tqdm import tqdm
 from transformers.trainer import get_scheduler
 
 from openrlhf.models import get_llm_for_sequence_regression
-from openrlhf.trainer import PPOTrainer
+from openrlhf.models.utils import masked_mean
+from openrlhf.trainer import BasePPOTrainer
 from openrlhf.trainer.ppo_utils import Experience
 from openrlhf.models.lmm_kits.utils import get_data_processor
 from openrlhf.utils.deepspeed import DeepspeedStrategy
@@ -18,7 +19,7 @@ from openrlhf.utils.deepspeed.deepspeed_utils import offload_deepspeed_states, r
 from .launcher import BasePPORole
 
 
-class CriticPPOTrainer(PPOTrainer):
+class CriticPPOTrainer(BasePPOTrainer):
     def ppo_train(self):
         # replay buffer may be empty at first, we should rebuild at each training
         dataloader = DataLoader(
@@ -59,7 +60,51 @@ class CriticPPOTrainer(PPOTrainer):
         return status_mean
 
     def training_step(self, experience: Experience) -> Dict[str, float]:
-        return self.training_step_critic(experience)
+        self.critic.train()
+
+        sequences = experience.sequences
+        old_values = experience.values
+        returns = experience.returns
+        action_mask = experience.action_mask
+        packed_seq_lens = None
+        attention_mask = experience.attention_mask
+        visual_inputs = experience.visual_inputs
+
+        # critic loss
+        values, output = self.critic(
+            sequences,
+            action_mask=action_mask,
+            attention_mask=attention_mask,
+            return_output=True,
+            ring_attn_group=self.strategy.ring_attn_group,
+            values_allgather=True,
+            packed_seq_lens=packed_seq_lens,
+            visual_inputs=visual_inputs,
+        )
+
+        # loss function
+        critic_loss = self.critic_loss_fn(
+            values,
+            old_values,
+            returns,
+            action_mask=experience.action_mask,
+        )
+        # mixtral
+        if self.aux_loss:
+            aux_loss = output.aux_loss
+        else:
+            aux_loss = 0
+        loss = critic_loss + aux_loss * self.args.aux_loss_coef
+        self.strategy.backward(loss, self.critic, self.critic_optim)
+        self.strategy.optimizer_step(self.critic_optim, self.critic, self.critic_scheduler, name="critic")
+
+        # status
+        status = {
+            "critic_loss": critic_loss.detach().item(),
+            "values": masked_mean(values, experience.action_mask).item(),
+            "critic_lr": self.critic_scheduler.get_last_lr()[0],
+        }
+        return status
 
 
 @ray.remote(num_gpus=1)
@@ -125,15 +170,9 @@ class CriticModelRayActor(BasePPORole):
             self.offload_states()
 
         # configure Trainer
-        # only use wandb at actor model
-        strategy.args.use_wandb = False
-        # configure tokenizer
-        args = strategy.args
-
         self.data_processor = get_data_processor(
             pretrain, self.critic, "left", strategy, use_fast=not strategy.args.disable_fast_tokenizer
         )
-
         self.trainer = CriticPPOTrainer(
             strategy,
             actor=None,
@@ -158,7 +197,7 @@ class CriticModelRayActor(BasePPORole):
     def forward(
         self,
         sequences: torch.LongTensor,
-        num_actions: Optional[Union[int, list[int]]] = None,
+        action_mask: Optional[Union[int, list[int]]] = None,
         attention_mask: Optional[torch.Tensor] = None,
         packed_seq_lens=None,
         visual_inputs=None,
@@ -172,7 +211,7 @@ class CriticModelRayActor(BasePPORole):
             visual_inputs = {k: v.to(device) for k, v in visual_inputs.items()}
             value = self.critic(
                 sequences.to(device),
-                num_actions,
+                action_mask.to(device),
                 attention_mask.to(device),
                 ring_attn_group=self.strategy.ring_attn_group,
                 values_allgather=True,

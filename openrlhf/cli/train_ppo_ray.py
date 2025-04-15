@@ -88,6 +88,7 @@ def train(args):
             args.vllm_tensor_parallel_size,
             args.pretrain,
             args.seed,
+            args.full_determinism,
             args.enable_prefix_caching,
             args.enforce_eager,
             max_len,
@@ -95,6 +96,7 @@ def train(args):
             pg if args.colocate_all_models else None,
             args.vllm_gpu_memory_utilization,
             args.vllm_enable_sleep,
+            limit_mm_per_prompt=args.limit_mm_per_prompt
         )
 
     actor_model = PPORayActorGroup(
@@ -144,6 +146,7 @@ def train(args):
     # multiple reward models
     if not args.remote_rm_url:
         reward_pretrains = args.reward_pretrain.split(",")
+        assert len(reward_pretrains) == 1, "Only one reward model is supported"
         reward_models = []
         for _ in reward_pretrains:
             reward_models.append(
@@ -178,7 +181,7 @@ def train(args):
 
     # train actor and critic model
     refs = actor_model.async_fit_actor_model(
-        critic_model, ref_model, reward_models, args.remote_rm_url, reward_fn=reward_fn, vllm_engines=vllm_engines
+        critic_model, ref_model, reward_models, args.remote_rm_url, reward_fn=reward_fn, custom_experience_filter=args.custom_experience_filter, vllm_engines=vllm_engines
     )
     ray.get(refs)
 
@@ -245,9 +248,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--vllm_gpu_memory_utilization",
         type=float,
-        default=0.9,
+        default=0.95,
         help="vLLM gpu_memory_utilization",
     )
+    parser.add_argument("--limit_mm_per_prompt", type=str, default=None, help="Limit the number of multimodal inputs per prompt")
 
     # Checkpoints
     parser.add_argument("--eval_steps", type=int, default=-1)
@@ -259,7 +263,9 @@ if __name__ == "__main__":
     parser.add_argument("--max_ckpt_num", type=int, default=3)
     parser.add_argument("--max_ckpt_mem", type=int, default=1e8)
     parser.add_argument("--load_checkpoint", action="store_true", default=False)
-    parser.add_argument("--universal_ckpt", action="store_true", default=False)
+    parser.add_argument(
+        "--use_ds_universal_ckpt", action="store_true", help="Use deepspeed universal checkpoint", default=False
+    )
 
     # DeepSpeed
     parser.add_argument("--local_rank", type=int, default=-1, help="local_rank for deepspeed")
@@ -299,8 +305,10 @@ if __name__ == "__main__":
     # PPO
     parser.add_argument("--save_path", type=str, default="./ckpt")
     parser.add_argument("--num_episodes", type=int, default=1)
+    parser.add_argument("--max_global_steps", type=int, default=None, help="Max global steps for PPO training. This will override num_episodes if set. Useful for dynamic sampling, which needs multiple rollouts for one training stage.")
     parser.add_argument("--rollout_batch_size", type=int, default=1024)
     parser.add_argument("--micro_rollout_batch_size", type=int, default=8)
+    parser.add_argument("--store_extra_buffers", action="store_true", default=False, help="Store extra buffers in replay buffer for oversampling.")
     parser.add_argument("--max_epochs", type=int, default=1)
     parser.add_argument("--prompt_max_len", type=int, default=1024, help="Max tokens for each prompt")
     parser.add_argument("--generate_max_len", type=int, default=1024, help="Max tokens to generate in PPO")
@@ -311,7 +319,7 @@ if __name__ == "__main__":
     parser.add_argument("--ptx_coef", type=float, default=0.05, help="PPO-ptx loss coef")
     parser.add_argument("--eps_clip", type=float, default=0.2, help="PPO clip range")
     parser.add_argument("--value_clip", type=float, default=0.2, help="PPO value clip range")
-    parser.add_argument("--lambd", type=float, default=0.95, help="PPO GAE lambd")
+    parser.add_argument("--lambd", type=float, default=1, help="PPO GAE lambd")
     parser.add_argument("--gamma", type=float, default=1, help="PPO GAE gamma")
     parser.add_argument("--micro_train_batch_size", type=int, default=4, help="batch size per GPU")
     parser.add_argument("--train_batch_size", type=int, default=128, help="Global training batch size")
@@ -350,17 +358,22 @@ if __name__ == "__main__":
     parser.add_argument("--freeze_prefix", type=str, nargs="+", default=None,
         help="List of parameter name prefixes to freeze during training"
     )
-    parser.add_argument("--drop_maxlen", action="store_true", default=False)
     parser.add_argument("--processor_kwargs",type=str,default=None,help="Processor kwargs. Should be a json string. There are always two keys: min_pixels and max_pixels, which are the minimum and maximum number of pixels for the image. If not provided, the default values are 4*28*28 and 16384*28*28 respectively.")
     # Reinforce
     parser.add_argument(
         "--advantage_estimator",
         type=str,
-        choices=["gae", "reinforce", "rloo", "reinforce_baseline", "group_norm"],
+        choices=["gae", "reinforce", "rloo", "reinforce_baseline", "group_norm", "dr_grpo"],
         default="gae",
-        help="Choose advantage estimation method: gae, reinforce, rloo, reinforce_baseline, group_norm",
+        help="Choose advantage estimation method: gae, reinforce, rloo, reinforce_baseline, group_norm, dr_grpo",
     )
     parser.add_argument("--use_kl_loss", action="store_true", default=False, help="whether to use KL loss from GRPO")
+    parser.add_argument(
+        "--no_advantage_std_norm",
+        action="store_true",
+        default=False,
+        help="disable dividing by std for advantages while keeping mean normalization",
+    )
 
     # Context Parallel
     parser.add_argument("--ring_attn_size", type=int, default=1, help="Ring attention group size")
@@ -380,21 +393,25 @@ if __name__ == "__main__":
     parser.add_argument("--critic_pretrain", type=str, default=None, help="HF model name or path")
     parser.add_argument("--value_head_prefix", type=str, default="score")
     parser.add_argument("--ref_reward_offload", action="store_true", default=False)
-
+    parser.add_argument("--custom_experience_filter", type=str, default=None, help="Custom experience filter")
     # Custom dataset
     parser.add_argument("--prompt_data", type=str, default=None, help="HF dataset name or path")
     parser.add_argument(
         "--prompt_data_probs",
         type=str,
-        default="1.0",
+        default=None,
         help="sampling probs for datasets",
     )
-    parser.add_argument("--prompt_split", type=str, default="train")
+    parser.add_argument("--eval_dataset", type=str, default=None, help="Path to the evaluation dataset")
+    parser.add_argument("--eval_temperature", type=float, default=0.6, help="Temperature for evaluation")
+    parser.add_argument(
+        "--eval_n_samples_per_prompt", type=int, default=4, help="Number of samples per prompt for evaluation"
+    )
     parser.add_argument("--pretrain_data", type=str, default=None, help="HF dataset name or path")
     parser.add_argument(
         "--pretrain_data_probs",
         type=str,
-        default="1.0",
+        default=None,
         help="sampling probs for datasets",
     )
     parser.add_argument("--pretrain_split", type=str, default="train")
@@ -467,6 +484,9 @@ if __name__ == "__main__":
         print("Set args.vllm_enable_sleep to False when args.colocate_all_models is disabled.")
         args.vllm_enable_sleep = False
 
+    if args.eval_dataset:
+        assert args.remote_rm_url, "`--eval_dataset` is only supported with `--remote_rm_url`."
+
     if args.use_ms:
         from modelscope.utils.hf_util import patch_hub
 
@@ -482,5 +502,15 @@ if __name__ == "__main__":
         args.processor_kwargs["max_pixels"] = args.processor_kwargs.get("max_pixels", 16384 * 28 * 28)
     else:
         args.processor_kwargs = {"min_pixels": 4 * 28 * 28, "max_pixels": 16384 * 28 * 28}
+    
+    if args.limit_mm_per_prompt:
+        import json
+        try:
+            args.limit_mm_per_prompt = json.loads(args.limit_mm_per_prompt)
+        except json.JSONDecodeError:
+            raise ValueError(f"Invalid Json string for --limit_mm_per_prompt: {args.limit_mm_per_prompt}")
+    else:
+        args.limit_mm_per_prompt = {"image": 1}
+
 
     train(args)
