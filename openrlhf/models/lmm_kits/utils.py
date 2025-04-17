@@ -1,27 +1,20 @@
-from transformers import AutoProcessor, AutoModel, AutoConfig
+from transformers import AutoProcessor, AutoConfig, AutoModelForCausalLM, AutoModelForImageTextToText
 from transformers.configuration_utils import PretrainedConfig
 import importlib
 import os
-
-def smart_load_config(pretrain_or_model):
-    """
-    Load config using AutoConfig, if failed, use PretrainedConfig and load patch to register the config to AutoConfig.
-    """
-    try:
-        config = AutoConfig.from_pretrained(pretrain_or_model, trust_remote_code=False)
-    except Exception as e:
-        config = PretrainedConfig.from_pretrained(pretrain_or_model)
-        load_patch(model_type=config.model_type)
-        config = AutoConfig.from_pretrained(pretrain_or_model, trust_remote_code=False)
-    return config
 
 
 def _get_kit_root_path(pretrain_or_model=None,model_type=None):
     assert (pretrain_or_model is not None) ^ (model_type is not None), "only and only one of pretrain_or_model and model_type should be provided"
     if model_type is None:
-        config = smart_load_config(pretrain_or_model)
+        # Safely load config without excuting remote code.
+        config = PretrainedConfig.from_pretrained(pretrain_or_model)
         model_type = config.model_type
     root_path = f".models.lmm_kits.{model_type}"
+    #check if the module exists.
+    if not importlib.util.find_spec(root_path,package="openrlhf"):
+        # This is an llm or unsupported lmm.
+        root_path = f".models.lmm_kits.llm"
     return root_path
 
 def _get_hf_processor(pretrain, model, padding_side="left", strategy=None, use_fast=True):
@@ -56,23 +49,23 @@ def load_patch(pretrain_or_model=None,model_type=None, use_liger_kernel=False):
     Patch = getattr(module, "Patch")
     Patch.load_all_patches(use_liger_kernel=use_liger_kernel)
 
-def get_generation_cls(config, use_liger_kernel=False):
-    model_type = config.model_type
+def get_generation_cls(pretrain_or_model, use_liger_kernel=False):
+    model_type = PretrainedConfig.from_pretrained(pretrain_or_model).model_type
     load_patch(model_type=model_type, use_liger_kernel=use_liger_kernel)
-    model_arch = AutoModel._model_mapping[type(config)].__name__
-    if model_arch.endswith("ForCausalLM") or \
-    model_arch.endswith("ForConditionalGeneration"):
-        return AutoModel._model_mapping[type(config)]
-    elif model_arch.endswith("Model"):
-        possible_arch = [model_arch.replace("Model", "ForCausalLM"), model_arch.replace("Model", "ForConditionalGeneration")]
-        module = importlib.import_module(f".models.{model_type}.modeling_{model_type}",package="transformers")
-        for arch in possible_arch:
-            model_cls = getattr(module, arch, None)
-            if model_cls is not None:
-                return model_cls
-        raise ValueError(f"Cannot find ForCausalLM or ForConditionalGeneration class for {model_arch}")
+    from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+    if model_type in CONFIG_MAPPING:
+        # load_patch register customized config if needed, so we ensure AutoConfig loads our customized config, not remote config.
+        # This also ensure type(config) mapped to our customized model class.
+        config = AutoConfig.from_pretrained(pretrain_or_model, trust_remote_code=False)
     else:
-        raise ValueError(f"Unexpected model architecture {model_arch}")
+        # Not a model customized by lmm-r1 or supported by transformers, so we trust remote code.
+        config = AutoConfig.from_pretrained(pretrain_or_model, trust_remote_code=True)
+    if type(config) in AutoModelForImageTextToText._model_mapping:
+        return AutoModelForImageTextToText._model_mapping[type(config)]
+    elif type(config) in AutoModelForCausalLM._model_mapping:
+        return AutoModelForCausalLM._model_mapping[type(config)]
+    else:
+        raise ValueError(f"Unexpected model architecture {model_type}")
 
 def hack_peft_model(peft_model):
     def get_inputs_embeds(*args,**kwargs):

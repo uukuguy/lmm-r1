@@ -10,7 +10,7 @@ from transformers.integrations.deepspeed import HfDeepSpeedConfig
 
 from .ring_attn_utils import set_hacked_position_ids, clear_hacked_position_ids
 from .utils import log_probs_from_logits
-from openrlhf.models.lmm_kits.utils import get_generation_cls, hack_peft_model, smart_load_config
+from openrlhf.models.lmm_kits.utils import get_generation_cls, hack_peft_model
 from openrlhf.models.lmm_kits.base.data_processor import MMInputs
 from .ring_attn_utils import gather_and_pad_tensor, unpad_and_slice_tensor
 
@@ -80,12 +80,10 @@ class Actor(nn.Module):
             else:
                 nf4_config = None
 
-            #There is no AutoModelForConditionalGeneration in transformers. We manually implement it.
-            config = smart_load_config(pretrain_or_model)
-            model_cls = get_generation_cls(config, use_liger_kernel=use_liger_kernel)
+            model_cls = get_generation_cls(pretrain_or_model, use_liger_kernel=use_liger_kernel)
             self.model = model_cls.from_pretrained(
                 pretrain_or_model,
-                trust_remote_code=False,
+                trust_remote_code=True,
                 attn_implementation=attn_implementation,
                 quantization_config=nf4_config,
                 torch_dtype=torch.bfloat16 if bf16 else "auto",

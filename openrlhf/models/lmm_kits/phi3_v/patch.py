@@ -3,12 +3,12 @@ import torch
 
 class Phi3_VPatch(BasePatch):
     def _register_to_autoclass():
-        from transformers import AutoModel, AutoConfig, AutoProcessor
+        from transformers import AutoModelForImageTextToText, AutoConfig, AutoProcessor
         from .src.configuration_phi3_v import Phi3VConfig
         from .src.modeling_phi3_v import Phi3VForCausalLM
         from .src.processing_phi3_v import Phi3VProcessor
         AutoConfig.register("phi3_v", Phi3VConfig)
-        AutoModel.register(Phi3VConfig, Phi3VForCausalLM)
+        AutoModelForImageTextToText.register(Phi3VConfig, Phi3VForCausalLM)
         AutoProcessor.register(Phi3VConfig, Phi3VProcessor)
     
     def _add_get_inputs_embeds():
