@@ -62,10 +62,13 @@ def get_generation_cls(pretrain_or_model, use_liger_kernel=False):
         config = AutoConfig.from_pretrained(pretrain_or_model, trust_remote_code=True)
     if type(config) in AutoModelForImageTextToText._model_mapping:
         return AutoModelForImageTextToText._model_mapping[type(config)]
-    elif type(config) in AutoModelForCausalLM._model_mapping:
-        return AutoModelForCausalLM._model_mapping[type(config)]
     else:
-        raise ValueError(f"Unexpected model architecture {model_type}")
+        # Compatible with LLMs
+        if use_liger_kernel:
+            from liger_kernel.transformers import AutoLigerKernelForCausalLM
+            return AutoLigerKernelForCausalLM
+        else:
+            return AutoModelForCausalLM
 
 def hack_peft_model(peft_model):
     def get_inputs_embeds(*args,**kwargs):
