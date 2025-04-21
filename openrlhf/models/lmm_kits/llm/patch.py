@@ -38,4 +38,5 @@ class LLMPatch(BasePatch):
         LLMPatch._add_get_inputs_embeds()
         LLMPatch._add_get_position_ids()
         LLMPatch._add_offset_split_position_ids()
-        
+
+Patch = LLMPatch()
