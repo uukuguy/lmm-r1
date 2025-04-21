@@ -1,4 +1,5 @@
 from transformers import AutoProcessor, AutoConfig, AutoModelForCausalLM, AutoModelForImageTextToText
+from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.configuration_utils import PretrainedConfig
 import importlib
 import os
@@ -22,6 +23,9 @@ def _get_hf_processor(pretrain, model, padding_side="left", strategy=None, use_f
     # There maybe some patches for the processor
     load_patch(pretrain_or_model=pretrain)
     processor = AutoProcessor.from_pretrained(pretrain, trust_remote_code=False, use_fast=use_fast, **processor_kwargs)
+    if isinstance(processor, PreTrainedTokenizer):
+        from .llm.data_processor import LLMProcessor
+        processor = LLMProcessor(processor)
     tokenizer = processor.tokenizer
     tokenizer.padding_side = padding_side
     # NOTE: When enable vLLM, do not resize_token_embeddings, or the vocab size will mismatch with vLLM.
