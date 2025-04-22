@@ -2,12 +2,10 @@ from typing import List
 from ..base.data_processor import BaseDataProcessor, MMInputs
 from qwen_vl_utils import process_vision_info
 import torch
-from transformers.processing_utils import ProcessorMixin
 from loguru import logger
 
-class LLMProcessor(ProcessorMixin):
+class LLMProcessor:
     def __init__(self,tokenizer):
-        super().__init__()
         self.tokenizer = tokenizer
     
     def __call__(self,*args,**kwargs):
@@ -15,6 +13,9 @@ class LLMProcessor(ProcessorMixin):
     
     def apply_chat_template(self,*args,**kwargs):
         return self.tokenizer.apply_chat_template(*args,**kwargs)
+
+    def save_pretrained(self,*args,**kwargs):
+        self.tokenizer.save_pretrained(*args,**kwargs)
     
     
 class LLMDataProcessor(BaseDataProcessor):
@@ -29,7 +30,9 @@ class LLMDataProcessor(BaseDataProcessor):
         truncation=True,
     ) -> MMInputs:
         messages = self._format_messages(messages)
-        texts = self.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        texts = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
         image_inputs, video_inputs = process_vision_info(messages)
         if image_inputs or video_inputs:
             logger.warning("Vision inputs are not supported for LLMs")
@@ -55,3 +58,7 @@ class LLMDataProcessor(BaseDataProcessor):
             MMInputs(extra_info={"input_ids": input_id, "attention_mask": attention_mask})
             for input_id, attention_mask in zip(input_ids_batch, attention_mask_batch)
         ]
+
+DataProcessor = LLMDataProcessor
+
+__all__ = ["LLMProcessor", "DataProcessor"]

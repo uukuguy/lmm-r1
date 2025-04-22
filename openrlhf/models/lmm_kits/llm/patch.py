@@ -34,9 +34,10 @@ class LLMPatch(BasePatch):
         # For LLM, we directly apply liger_kernel in get_generation_cls
         pass
     
-    def _load_all_patches():
-        LLMPatch._add_get_inputs_embeds()
-        LLMPatch._add_get_position_ids()
-        LLMPatch._add_offset_split_position_ids()
+    @classmethod
+    def _load_all_patches(cls):
+        cls._add_get_inputs_embeds()
+        cls._add_get_position_ids()
+        cls._add_offset_split_position_ids()
 
 Patch = LLMPatch()

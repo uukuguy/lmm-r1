@@ -71,8 +71,9 @@ def get_llm_for_sequence_regression(
 
     base_class = get_generation_cls(model_name_or_path)
     from transformers.models.auto.configuration_auto import CONFIG_MAPPING
-    model_type = base_class.config_class.model_type
-    config = AutoConfig.from_pretrained(model_name_or_path,trust_remote_code= model_type not in CONFIG_MAPPING)
+    from transformers.configuration_utils import PretrainedConfig
+    base_model_type = PretrainedConfig.from_pretrained(model_name_or_path).model_type
+    config = AutoConfig.from_pretrained(model_name_or_path,trust_remote_code= base_model_type not in CONFIG_MAPPING)
     config.normalize_reward = normalize_reward
     config._attn_implementation = "flash_attention_2" if use_flash_attention_2 else "eager"
 
