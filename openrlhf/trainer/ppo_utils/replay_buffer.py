@@ -112,7 +112,7 @@ def make_experience_batch(items: List[BufferItem], data_processor: Optional[Base
     )
     for key in keys:
         vals = [getattr(item, key) for item in items]
-        vals = torch.stack(vals, dim=0) if vals[0] is not None else None
+        vals = zero_pad_sequences(vals, "left") if vals[0] is not None else None
         kwargs[key] = vals
 
     kwargs["info"] = {}
@@ -201,7 +201,8 @@ class NaiveReplayBuffer(ABC):
     def append(self, experience: Experience) -> None:
         if self.cpu_offload:
             experience.to_device(torch.device("cpu"))
-        items = split_experience_batch(experience,self.data_processor)
+        items = split_experience_batch(experience, self.data_processor)
+        items = remove_padding_in_sequences(items)
         self.items.extend(items)
         if self.limit > 0:
             num_samples_to_remove = max(0, len(self.items) - self.limit)
@@ -234,35 +235,6 @@ class NaiveReplayBuffer(ABC):
     def collate_fn(self, batch) -> Experience:
         experience = make_experience_batch(batch, self.data_processor, self.packing_samples)
         return experience
-
-    def normalize(self, strategy, attribute: str, divide_by_std: bool = True) -> None:
-        assert attribute == "advantages"
-        items = []
-        action_masks = []
-        for item in self:
-            items.append(getattr(item, attribute))
-            action_masks.append(item.action_mask)
-
-        items_vector = torch.cat(items).float().flatten()
-
-        action_masks_vector = torch.cat(action_masks).flatten()
-        num_actions = action_masks_vector.sum()
-
-        # for DP
-        # mean
-        sum_and_count = torch.tensor([items_vector.sum(), num_actions], device=items_vector.device)
-        all_sum, all_count = strategy.all_reduce(sum_and_count, "sum")
-        mean = all_sum / all_count
-        # std
-        if divide_by_std:
-            std = ((items_vector - mean).pow(2) * action_masks_vector).sum()
-            all_std = strategy.all_reduce(std, "sum")
-            rstd = (all_std / all_count).clamp(min=1e-8).rsqrt()
-        else:
-            rstd = 1
-
-        for i, item in enumerate(self):
-            setattr(item, attribute, (items[i] - mean) * rstd + 1e-8)
 
     def set_limit(self, limit: int) -> None:
         self.limit = limit
