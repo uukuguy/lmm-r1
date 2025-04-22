@@ -823,7 +823,7 @@ class ActorModelRayActor(BasePPORole):
         # configure tokenizer
         
         self.data_processor = get_data_processor(
-            pretrain, actor.model, "left", strategy, use_fast=not strategy.args.disable_fast_tokenizer
+            pretrain, "left", strategy, use_fast=not strategy.args.disable_fast_tokenizer
         )
         self.tokenizer = self.data_processor.tokenizer
 

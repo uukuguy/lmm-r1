@@ -172,7 +172,7 @@ class CriticModelRayActor(BasePPORole):
 
         # configure Trainer
         self.data_processor = get_data_processor(
-            pretrain, self.critic, "left", strategy, use_fast=not strategy.args.disable_fast_tokenizer
+            pretrain, "left", strategy, use_fast=not strategy.args.disable_fast_tokenizer
         )
         self.trainer = CriticPPOTrainer(
             strategy,

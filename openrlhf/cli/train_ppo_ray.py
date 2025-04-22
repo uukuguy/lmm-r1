@@ -509,8 +509,6 @@ if __name__ == "__main__":
             args.limit_mm_per_prompt = json.loads(args.limit_mm_per_prompt)
         except json.JSONDecodeError:
             raise ValueError(f"Invalid Json string for --limit_mm_per_prompt: {args.limit_mm_per_prompt}")
-    else:
-        args.limit_mm_per_prompt = {"image": 1}
 
 
     train(args)
