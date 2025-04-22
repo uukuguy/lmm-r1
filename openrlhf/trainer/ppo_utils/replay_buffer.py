@@ -179,8 +179,6 @@ class NaiveReplayBuffer(ABC):
         limit: int = 0, 
         cpu_offload: bool = True, 
         packing_samples: bool = False,
-        drop_maxlen: bool = False,
-        maxlen: int = 10**8,
         store_extra_buffers: bool = False,
     ) -> None:
         super().__init__()
@@ -192,8 +190,6 @@ class NaiveReplayBuffer(ABC):
         self.packing_samples = packing_samples
         self.target_device = torch.device(f"cuda:{torch.cuda.current_device()}")
         self.items: List[BufferItem] = []
-        self.maxlen = maxlen
-        self.drop_maxlen = drop_maxlen
         self.store_extra_buffers = store_extra_buffers
         self.extra_buffers: List[BufferItem] = []
 
