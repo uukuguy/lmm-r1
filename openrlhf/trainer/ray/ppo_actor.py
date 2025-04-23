@@ -80,8 +80,8 @@ class ActorPPOTrainer(ABC):
         self.aux_loss = self.args.aux_loss_coef > 1e-8
 
         self.replay_buffer = NaiveReplayBuffer(
-            micro_train_batch_size, self.data_processor, buffer_limit, buffer_cpu_offload, getattr(self.args, "packing_samples", False), self.args.store_extra_buffers
-        )
+            micro_train_batch_size, self.data_processor, buffer_limit, buffer_cpu_offload, getattr(self.args, "packing_samples", False), False
+        ) # Dynamic sampling is controlled by the single controller. We don't need to store extra buffers here.
 
         # Init torch group for weights sync
         backend = getattr(self.strategy.args, "vllm_sync_backend", "nccl")
@@ -496,6 +496,7 @@ class ActorModelRayActor(BasePPORole):
             strategy.print(f"Loading the checkpoint: {ckpt_path}")
             _, states = strategy.load_ckpt(self.actor.model, ckpt_path)
             self.consumed_samples = states["consumed_samples"]
+            self.trained_steps = states["trained_steps"]
             strategy.print(f"consumed_samples: {self.consumed_samples}")
 
         # initial offload
@@ -561,8 +562,8 @@ class ActorModelRayActor(BasePPORole):
     def broadcast_to_vllm(self):
         self.trainer._broadcast_to_vllm()
 
-    def get_consumed_samples(self):
-        return self.consumed_samples
+    def get_attr(self,key:str):
+        return getattr(self,key)
 
     def append(self, experience: Experience):
         self.trainer.replay_buffer.append(experience)

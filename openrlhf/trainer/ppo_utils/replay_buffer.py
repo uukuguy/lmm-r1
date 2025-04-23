@@ -120,6 +120,10 @@ def make_experience_batch(items: List[BufferItem], data_processor: Optional[Base
         vals = torch.tensor([item.info[key] for item in items])
         kwargs["info"][key] = vals
     
+    for input_ids, attention_mask, item in zip(kwargs["sequences"], kwargs["attention_mask"], items):
+        item.visual_inputs.extra_info['input_ids'] = input_ids
+        item.visual_inputs.extra_info['attention_mask'] = attention_mask
+    
     kwargs["visual_inputs"] = data_processor.make_input_batch([item.visual_inputs for item in items])
     return Experience(**kwargs)
 
@@ -180,6 +184,7 @@ class NaiveReplayBuffer(ABC):
         cpu_offload: bool = True, 
         packing_samples: bool = False,
         store_extra_buffers: bool = False,
+        device: Optional[str] = None
     ) -> None:
         super().__init__()
         self.sample_batch_size = sample_batch_size
@@ -188,7 +193,9 @@ class NaiveReplayBuffer(ABC):
         self.limit = limit
         self.cpu_offload = cpu_offload
         self.packing_samples = packing_samples
-        self.target_device = torch.device(f"cuda:{torch.cuda.current_device()}")
+        if device is None:
+            device = f"cuda:{torch.cuda.current_device()}"
+        self.target_device = torch.device(device)
         self.items: List[BufferItem] = []
         self.store_extra_buffers = store_extra_buffers
         self.extra_buffers: List[BufferItem] = []
@@ -206,6 +213,10 @@ class NaiveReplayBuffer(ABC):
             self.items = self.items[num_samples_to_remove:]
             if self.store_extra_buffers:
                 self.extra_buffers.extend(samples_to_remove)
+
+    def extend(self, experiences: List[Experience]):
+        for experience in experiences:
+            self.append(experience)
 
     def clear(self) -> None:
         self.items.clear()

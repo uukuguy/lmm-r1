@@ -52,8 +52,8 @@ class CriticPPOTrainer(ABC):
         self.max_epochs = self.args.max_epochs
 
         self.replay_buffer = NaiveReplayBuffer(
-            micro_train_batch_size, data_processor, buffer_limit, buffer_cpu_offload, getattr(self.args, "packing_samples", False), self.args.store_extra_buffers
-        )
+            micro_train_batch_size, data_processor, buffer_limit, buffer_cpu_offload, getattr(self.args, "packing_samples", False), False
+        ) # Dynamic sampling is controlled by the single controller. We don't need to store extra buffers here.
 
         self.critic_loss_fn = ValueLoss(value_clip)
 
