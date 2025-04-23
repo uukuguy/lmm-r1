@@ -40,6 +40,8 @@ class PPOTrainer(ABC):
         vllm_engines=None,
         prompt_max_len: int = 120,
         dataloader_pin_memory: bool = True,
+        prompt_split: str = "train",
+        eval_split: str = "test",
         **generate_kwargs,
     ) -> None:
         super().__init__()
@@ -55,6 +57,9 @@ class PPOTrainer(ABC):
         self.reference_model_group = reference_model_group
         self.dataloader_pin_memory = dataloader_pin_memory
         self.vllm_engines = vllm_engines
+
+        self.prompt_split = prompt_split
+        self.eval_split = eval_split
 
         self.prompt_max_len = prompt_max_len
         self.generate_kwargs = generate_kwargs
@@ -104,6 +109,7 @@ class PPOTrainer(ABC):
         # wandb/tensorboard setting
         self._wandb = None
         self._tensorboard = None
+        self.generated_samples_table = None
         if self.strategy.args.use_wandb:
             import wandb
 
@@ -123,6 +129,7 @@ class PPOTrainer(ABC):
             wandb.define_metric("train/*", step_metric="train/global_step", step_sync=True)
             wandb.define_metric("eval/epoch")
             wandb.define_metric("eval/*", step_metric="eval/epoch", step_sync=True)
+            self.generated_samples_table = wandb.Table(columns=["global_step", "text", "reward"])
 
         # Initialize TensorBoard writer if wandb is not available
         if self.strategy.args.use_tensorboard and self._wandb is None:
@@ -188,10 +195,10 @@ class PPOTrainer(ABC):
                 if not self.replay_buffer.full():
                     print(f"📌 Replay buffer space: {len(self.replay_buffer)}/{self.replay_buffer.limit}. Continue to sample more data.")
                     continue
-                output = self.tokenizer.batch_decode(
+                sample0 = self.tokenizer.batch_decode(
                     experiences[0].sequences[0].unsqueeze(0), skip_special_tokens=True
                 )
-                self.strategy.print(output)
+                print(sample0)
                 exp_dataloader = DataLoader(
                     self.replay_buffer,
                     batch_size=1, # bs=1 for fine-grained data chunking
@@ -213,6 +220,8 @@ class PPOTrainer(ABC):
                     self.kl_ctl.update(status["kl"], args.rollout_batch_size * args.n_samples_per_prompt)
                 pbar.set_postfix(status)
 
+                # Add generated samples to status dictionary
+                status["generated_samples"] = [sample0[0], experiences[0].info["reward"][0]]
                 # logs/checkpoints
                 client_states = {"consumed_samples": total_consumed_samples, "trained_steps": steps}
                 self.save_logs_and_checkpoints(args, steps, pbar, status, client_states)
@@ -225,9 +234,9 @@ class PPOTrainer(ABC):
             episode = episode + 1
             pbar.set_description(f"Steps [Episode {episode+1}]")
 
-        if self._wandb is not None and self.strategy.is_rank_0():
+        if self._wandb is not None:
             self._wandb.finish()
-        if self._tensorboard is not None and self.strategy.is_rank_0():
+        if self._tensorboard is not None:
             self._tensorboard.close()
 
     def ppo_train(self, global_steps):
@@ -278,7 +287,16 @@ class PPOTrainer(ABC):
     def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
         if global_step % args.logging_steps == 0:
             # wandb
-            if self._wandb is not None and self.strategy.is_rank_0():
+            if self._wandb is not None:
+                # Add generated samples to wandb using Table
+                if "generated_samples" in logs_dict:
+                    # https://github.com/wandb/wandb/issues/2981#issuecomment-1997445737
+                    new_table = self._wandb.Table(
+                        columns=self.generated_samples_table.columns, data=self.generated_samples_table.data
+                    )
+                    new_table.add_data(global_step, *logs_dict.pop("generated_samples"))
+                    self.generated_samples_table = new_table
+                    self._wandb.log({"train/generated_samples": new_table})
                 logs = {
                     "train/%s" % k: v
                     for k, v in {
@@ -288,9 +306,15 @@ class PPOTrainer(ABC):
                 }
                 self._wandb.log(logs)
             # TensorBoard
-            elif self._tensorboard is not None and self.strategy.is_rank_0():
+            elif self._tensorboard is not None:
                 for k, v in logs_dict.items():
-                    self._tensorboard.add_scalar(f"train/{k}", v, global_step)
+                    if k == "generated_samples":
+                        # Record generated samples in TensorBoard using simple text format
+                        text, reward = v
+                        formatted_text = f"Sample:\n{text}\n\nReward: {reward:.4f}"
+                        self._tensorboard.add_text("train/generated_samples", formatted_text, global_step)
+                    else:
+                        self._tensorboard.add_scalar(f"train/{k}", v, global_step)
 
         # TODO: Add evaluation mechanism for PPO
         if global_step % args.eval_steps == 0 and self.eval_dataloader and len(self.eval_dataloader) > 0:
@@ -390,7 +414,8 @@ class PPOTrainer(ABC):
 
                 # Calculate pass@k and pass@1
                 prompt_rewards = rewards[i]
-                global_metrics[datasource][f"pass{n_samples_per_prompt}"] += prompt_rewards.max().float().item()
+                if n_samples_per_prompt > 1:
+                    global_metrics[datasource][f"pass{n_samples_per_prompt}"] += prompt_rewards.max().float().item()
                 global_metrics[datasource]["pass1"] += prompt_rewards.mean().float().item()
                 global_metrics[datasource]["count"] += 1
 
@@ -415,9 +440,8 @@ class PPOTrainer(ABC):
 
         end_time = time.time()
         duration = end_time - start_time
-        if self.strategy.is_rank_0():
-            time_str = str(timedelta(seconds=duration)).split(".")[0]
-            logger.info(f"✨ Evaluation completed in {time_str}")
+        time_str = str(timedelta(seconds=duration)).split(".")[0]
+        logger.info(f"✨ Evaluation completed in {time_str}")
 
     def prepare_datasets(self):
         args = self.args
@@ -430,6 +454,7 @@ class PPOTrainer(ABC):
             strategy,
             args.seed,
             max_count=args.max_samples,
+            dataset_split=self.prompt_split,
         )
 
         # Create train dataset
@@ -448,6 +473,7 @@ class PPOTrainer(ABC):
                 args.eval_dataset,
                 None,  # No probability sampling for eval datasets
                 strategy,
+                dataset_split=self.eval_split,
             )
             eval_data = eval_data.select(range(min(args.max_samples, len(eval_data))))
             eval_dataset = PromptDataset(eval_data, self.tokenizer, strategy, input_template=args.input_template)
