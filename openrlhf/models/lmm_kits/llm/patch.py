@@ -27,7 +27,7 @@ class LLMPatch(BasePatch):
         from transformers.modeling_utils import PreTrainedModel
         def offset_split_position_ids(self, split_position_ids, hacked_position_ids):
             # For common position_ids, hacked_position_ids is what we want
-            return split_position_ids
+            return hacked_position_ids
         PreTrainedModel.offset_split_position_ids = offset_split_position_ids
     
     def apply_liger_kernel():
