@@ -12,6 +12,7 @@ from math_verify import LatexExtractionConfig, parse, verify
 
 from loguru import logger
 from concurrent import futures
+
 app = Flask(__name__)
 
 problem_to_answer = {}
@@ -40,7 +41,6 @@ def verify_format(content):
     return bool(re.match(format_pattern, content, re.DOTALL)) and think_count == 1 and answer_count == 1
 
 
-
 def find_similar_problem(problem):
     max_sim = -1
     target_problem = None
@@ -52,7 +52,7 @@ def find_similar_problem(problem):
     return target_problem
 
 
-def verify_math(content,sol):
+def verify_math(content, sol):
     gold_parsed = parse(
         sol,
         extraction_mode="first_match",
@@ -68,7 +68,7 @@ def verify_math(content,sol):
                         nits=False,
                         malformed_operators=False,
                         basic_latex=True,
-                        boxed='all',
+                        boxed="all",
                         units=True,
                     ),
                     # Ensures that boxed is tried first
@@ -95,51 +95,42 @@ def verify_math(content,sol):
 def get_reward():
     # 获取请求中的 JSON 数据
     data = request.get_json()
-    # 检查是否有 'query' 字段
-    if "query" not in data:
-        return jsonify({"error": "queries field is required"}), 400
+    if "query" not in data or "prompts" not in data or "labels" not in data:
+        return jsonify({"error": "query, prompts, and labels fields are required"}), 400
     rewards = []
     format_rewards = []
     acc_rewards_futures = []
-    for q,problem in zip(data["query"],data["prompts"]):
+    for q, problem, answer in zip(data["query"], data["prompts"], data["labels"]):
         if problem is None:
             return jsonify({"error": f"problem not found from {q}"}), 400
-        if problem not in problem_to_answer:
-            # This should not happen
-            print(f"problem not exists: {problem}")
-            problem = find_similar_problem(problem)
-        answer = problem_to_answer[problem]
+        if not answer.startswith("$"):
+            answer = "$" + answer + "$"
+
         response = get_response_from_query(q) or q
         if response is None:
             return jsonify({"error": f"response not found from {q}"}), 400
         format_reward = float(verify_format(response)) * 0.5
         acc_reward_future = math_verify_executor.submit(verify_math, response, answer)
-       
+
         do_print = random.randint(1, 20) == 1
         if do_print:
-            info=f"Query: {q}\n\nProblem: {problem}\n\n Answer: {answer}\n\n Response: {response}\n\n Format Reward: {format_reward}\n\n Acc Reward: {acc_reward_future.result()}\n\n"
-            info = re.sub(r"<\|.*?\|>","",info)
+            info = f"Query: {q}\n\nProblem: {problem}\n\n Answer: {answer}\n\n Response: {response}\n\n Format Reward: {format_reward}\n\n Acc Reward: {acc_reward_future.result()}\n\n"
+            info = re.sub(r"<\|.*?\|>", "", info)
             logger.info(info)
-            
+
         format_rewards.append(format_reward)
         acc_rewards_futures.append(acc_reward_future)
     acc_rewards = [f.result() for f in acc_rewards_futures]
     rewards = [f + a for f, a in zip(format_rewards, acc_rewards)]
     # 返回包含 rewards 的响应
-    return jsonify({"rewards": rewards,"format_rewards":format_rewards,"acc_rewards":acc_rewards})
+    return jsonify({"rewards": rewards, "format_rewards": format_rewards, "acc_rewards": acc_rewards})
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument(
-        "--dataset", type=str, default=None, help="Datasets to use (comma separated)", required=True
-    )
-    parser.add_argument(
-        "--prompt-template", type=str, default=None, help="Prompt template", required=True
-    )
-    parser.add_argument(
-        "--input_key", type=str, default="prompt", help="The key name of prompt."
-    )
+    parser.add_argument("--dataset", type=str, default=None, help="Datasets to use (comma separated)", required=True)
+    parser.add_argument("--prompt-template", type=str, default=None, help="Prompt template", required=True)
+    parser.add_argument("--input_key", type=str, default="prompt", help="The key name of prompt.")
     parser.add_argument("--log_file", type=str, default="remote_rm.log", help="Log file path")
     args = parser.parse_args()
     if os.path.exists(args.log_file):
@@ -148,7 +139,7 @@ if __name__ == "__main__":
     logger.add(args.log_file)
     # Split dataset paths and load all datasets
     dataset = []
-    for dataset_path in args.dataset.split(','):
+    for dataset_path in args.dataset.split(","):
         dataset_path = dataset_path.strip()
         if dataset_path.endswith("json"):
             with open(dataset_path, "r") as f:
@@ -161,31 +152,19 @@ if __name__ == "__main__":
 
     format_pattern = r"^<think>(?:(?!</think>).)*</think><answer>(?:(?!</answer>).)*</answer>\Z"
 
-    if args.prompt_template=="chatml":
-        problem_pattern = r"<\|im_start\|>user\n(.*?)<\|im_end\|>"
+    if args.prompt_template == "chatml":
         response_prefix = r"<\|im_start\|>assistant\n"
-    elif args.prompt_template=="qwen1":
-        problem_pattern = r"｜User｜>(.*?)<｜Assistant｜>"
+    elif args.prompt_template == "qwen1":
         response_prefix = r"<｜Assistant｜>"
-    elif args.prompt_template=="base":
-        problem_pattern = r"User: (.*?)\n\nAssistant:"
+    elif args.prompt_template == "base":
         response_prefix = r"Assistant: "
-    elif args.prompt_template=="phi3":
-        problem_pattern = r"<|user|>\n(.*?)<|end|>\n<|assistant|>\n"
+    elif args.prompt_template == "phi3":
         response_prefix = r"<|assistant|>\n"
-    elif args.prompt_template=="phi4":
-        problem_pattern = r"<|user|>\n(.*?)<|end|>\n<|assistant|>\n"
+    elif args.prompt_template == "phi4":
         response_prefix = r"<|assistant|>\n"
     else:
         raise ValueError(f"Unknown chat format: {args.dataset}")
     print("load dataset success")
-    for item in dataset:
-        problem = item[args.input_key]
-        answer = item["answer"].strip()
-        # we require the answer to be in latex format
-        if answer[0] != "$":
-            answer = "$" + answer + "$"
-        problem_to_answer[problem] = answer
 
     # math_verify can only run in main thread
     math_verify_executor = futures.ProcessPoolExecutor(max_workers=16)
