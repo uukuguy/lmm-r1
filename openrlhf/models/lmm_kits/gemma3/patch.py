@@ -63,8 +63,9 @@ class Gemma3_Patch(BasePatch):
 
         Gemma3ForConditionalGeneration.offset_split_position_ids = offset_split_position_ids
 
-    def apply_liger_kernel(self):
-        raise ValueError("Gemma3 does not support liger kernel")
+    def apply_liger_kernel():
+        from liger_kernel.transformers import apply_liger_kernel_to_gemma3
+        apply_liger_kernel_to_gemma3()
 
     @classmethod
     def _load_all_patches(cls):
