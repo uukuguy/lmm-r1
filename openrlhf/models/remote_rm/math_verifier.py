@@ -16,6 +16,7 @@ from concurrent import futures
 app = Flask(__name__)
 
 problem_to_answer = {}
+enable_format_reward = True
 
 
 def get_response_from_query(q: str):
@@ -39,17 +40,6 @@ def verify_format(content):
     think_count = content.count("<think>")
     answer_count = content.count("<answer>")
     return bool(re.match(format_pattern, content, re.DOTALL)) and think_count == 1 and answer_count == 1
-
-
-def find_similar_problem(problem):
-    max_sim = -1
-    target_problem = None
-    for p in problem_to_answer.keys():
-        sim = Levenshtein.ratio(problem, p)
-        if sim > max_sim:
-            max_sim = sim
-            target_problem = p
-    return target_problem
 
 
 def verify_math(content, sol):
@@ -109,7 +99,10 @@ def get_reward():
         response = get_response_from_query(q) or q
         if response is None:
             return jsonify({"error": f"response not found from {q}"}), 400
-        format_reward = float(verify_format(response)) * 0.5
+        # Apply format reward only if enabled
+        format_reward = 0.0
+        if enable_format_reward:
+            format_reward = float(verify_format(response)) * 0.5
         acc_reward_future = math_verify_executor.submit(verify_math, response, answer)
 
         do_print = random.randint(1, 20) == 1
@@ -132,6 +125,11 @@ if __name__ == "__main__":
     parser.add_argument("--prompt-template", type=str, default=None, help="Prompt template", required=True)
     parser.add_argument("--input_key", type=str, default="prompt", help="The key name of prompt.")
     parser.add_argument("--log_file", type=str, default="remote_rm.log", help="Log file path")
+    parser.add_argument(
+        "--disable-format-reward",
+        action="store_true",
+        help="Disable format reward calculation. When enabled (default), responses get +0.5 reward for correct format.",
+    )
     args = parser.parse_args()
     if os.path.exists(args.log_file):
         os.remove(args.log_file)
@@ -149,6 +147,10 @@ if __name__ == "__main__":
                 dataset.extend([json.loads(l) for l in f.readlines()])
         else:
             raise ValueError(f"Unsupported file format for dataset: {dataset_path}")
+    # Set format reward flag based on command line argument
+    enable_format_reward = not args.disable_format_reward
+    print(f"Format reward is {'disabled' if args.disable_format_reward else 'enabled'}")
+    logger.info(f"Format reward is {'disabled' if args.disable_format_reward else 'enabled'}")
 
     format_pattern = r"^<think>(?:(?!</think>).)*</think><answer>(?:(?!</answer>).)*</answer>\Z"
 
@@ -162,7 +164,7 @@ if __name__ == "__main__":
         response_prefix = r"<|assistant|>\n"
     elif args.prompt_template == "phi4":
         response_prefix = r"<|assistant|>\n"
-    elif args.prompt_template=="gemma3":
+    elif args.prompt_template == "gemma3":
         response_prefix = r"<start_of_turn>model\n"
     else:
         raise ValueError(f"Unknown chat format: {args.dataset}")
