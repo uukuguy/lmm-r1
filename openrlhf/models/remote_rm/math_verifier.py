@@ -162,6 +162,8 @@ if __name__ == "__main__":
         response_prefix = r"<|assistant|>\n"
     elif args.prompt_template == "phi4":
         response_prefix = r"<|assistant|>\n"
+    elif args.prompt_template=="gemma3":
+        response_prefix = r"<start_of_turn>model\n"
     else:
         raise ValueError(f"Unknown chat format: {args.dataset}")
     print("load dataset success")
