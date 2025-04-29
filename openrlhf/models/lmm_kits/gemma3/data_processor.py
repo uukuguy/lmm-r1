@@ -57,7 +57,7 @@ class Gemma3_VLDataProcessor(BaseDataProcessor):
                 # concat all patches of all images in a batch in the first dimension
                 batch[k] = torch.cat([inp[k] for inp in inputs if k in inp], dim=0)
             else:
-                raise ValueError(f"Unknown key {k} for Qwen2VLDataProcessor")
+                raise ValueError(f"Unknown key {k} for Gemma3_VLDataProcessor")
         emb_inputs, extra_info, forward_inputs = self._split_input_dict(batch)
         return MMInputs(emb_inputs=emb_inputs, extra_info=extra_info, forward_inputs=forward_inputs)
 
@@ -92,7 +92,6 @@ class Gemma3_VLDataProcessor(BaseDataProcessor):
                 img_num = (token_type_ids_i == 1).sum().item() // 256
                 if img_num == 0:
                     batch_kwargs[i]["pixel_values"] = None
-                    batch_kwargs[i]["image_grid_thw"] = None
                     continue
 
                 pixel_values_i = pixel_values[:img_num]
@@ -121,17 +120,7 @@ class Gemma3_VLDataProcessor(BaseDataProcessor):
         return messages_list
 
     def _format_messages(self, messages: Union[Dict, List[str], str]) -> List[List[Dict]]:
-        from copy import deepcopy
-
-        messages = deepcopy(messages)
-        if isinstance(messages, list) and isinstance(messages[0], str):
-            formated_messages = [json.loads(m) for m in messages]
-        elif isinstance(messages, str):
-            formated_messages = [json.loads(messages)]
-        elif isinstance(messages, dict):
-            formated_messages = [[messages]]
-        else:
-            raise ValueError("Invalid messages format, must be a list of strings or a string or a dict")
+        formated_messages = super()._format_messages(messages)
         formated_messages = self.warp_str_content_to_dict(formated_messages)
 
         return formated_messages
