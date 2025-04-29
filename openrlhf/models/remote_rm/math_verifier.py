@@ -18,7 +18,7 @@ enable_format_reward = True
 
 
 def get_response_from_query(q: str):
-    ends_of_sentence = ["<|im_end|>", "<｜end▁of▁sentence｜>", "<|endoftext|>"]
+    ends_of_sentence = ["<|im_end|>", "<｜end▁of▁sentence｜>", "<|endoftext|>", "<end_of_turn>"]
     pos = re.search(response_prefix, q)
     if pos is None:
         return None
@@ -106,7 +106,7 @@ def get_reward():
         do_print = random.randint(1, 20) == 1
         if do_print:
             info = f"Query: {q}\n\nProblem: {problem}\n\n Answer: {answer}\n\n Response: {response}\n\n Format Reward: {format_reward}\n\n Acc Reward: {acc_reward_future.result()}\n\n"
-            info = re.sub(r"<\|.*?\|>", "", info)
+            info = re.sub(r"<\|.*?\|>|<pad>", "", info)
             logger.info(info)
 
         format_rewards.append(format_reward)
