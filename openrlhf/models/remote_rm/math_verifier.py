@@ -3,9 +3,7 @@ import os
 import random
 import re
 from argparse import ArgumentParser
-from multiprocessing import Process, Queue
 
-import Levenshtein
 from flask import Flask, jsonify, request
 from latex2sympy2_extended import NormalizationConfig
 from math_verify import LatexExtractionConfig, parse, verify
@@ -121,7 +119,6 @@ def get_reward():
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--dataset", type=str, default=None, help="Datasets to use (comma separated)", required=True)
     parser.add_argument("--prompt-template", type=str, default=None, help="Prompt template", required=True)
     parser.add_argument("--input_key", type=str, default="prompt", help="The key name of prompt.")
     parser.add_argument("--log_file", type=str, default="remote_rm.log", help="Log file path")
@@ -135,18 +132,7 @@ if __name__ == "__main__":
         os.remove(args.log_file)
     logger.remove()
     logger.add(args.log_file)
-    # Split dataset paths and load all datasets
-    dataset = []
-    for dataset_path in args.dataset.split(","):
-        dataset_path = dataset_path.strip()
-        if dataset_path.endswith("json"):
-            with open(dataset_path, "r") as f:
-                dataset.extend(json.load(f))
-        elif dataset_path.endswith("jsonl"):
-            with open(dataset_path, "r") as f:
-                dataset.extend([json.loads(l) for l in f.readlines()])
-        else:
-            raise ValueError(f"Unsupported file format for dataset: {dataset_path}")
+
     # Set format reward flag based on command line argument
     enable_format_reward = not args.disable_format_reward
     print(f"Format reward is {'disabled' if args.disable_format_reward else 'enabled'}")
@@ -167,8 +153,7 @@ if __name__ == "__main__":
     elif args.prompt_template == "gemma3":
         response_prefix = r"<start_of_turn>model\n"
     else:
-        raise ValueError(f"Unknown chat format: {args.dataset}")
-    print("load dataset success")
+        raise ValueError(f"Unknown chat format: {args.prompt_template}")
 
     # math_verify can only run in main thread
     math_verify_executor = futures.ProcessPoolExecutor(max_workers=16)
