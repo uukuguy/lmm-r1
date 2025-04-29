@@ -3,11 +3,6 @@ import torch
 
 
 class Gemma3_Patch(BasePatch):
-    def _register_to_autoclass():
-        from transformers import AutoModel, Gemma3Config, Gemma3ForConditionalGeneration
-
-        AutoModel.register(Gemma3Config, Gemma3ForConditionalGeneration)
-
     def _add_get_inputs_embeds():
         from transformers import Gemma3ForConditionalGeneration
         from transformers.utils import is_torchdynamo_compiling
@@ -71,6 +66,7 @@ class Gemma3_Patch(BasePatch):
 
     def apply_liger_kernel():
         from liger_kernel.transformers import apply_liger_kernel_to_gemma3
+
         apply_liger_kernel_to_gemma3()
 
     @classmethod
@@ -78,7 +74,6 @@ class Gemma3_Patch(BasePatch):
         cls._add_get_inputs_embeds()
         cls._add_get_position_ids()
         cls._add_offset_split_position_ids()
-        cls._register_to_autoclass()
 
 
 Patch = Gemma3_Patch()
