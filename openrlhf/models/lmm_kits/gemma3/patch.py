@@ -38,6 +38,12 @@ class Gemma3_Patch(BasePatch):
                     )
                 image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
                 inputs_embeds = inputs_embeds.masked_scatter(special_image_mask, image_features)
+            else:
+                fake_pixel_values = torch.zeros(
+                    (1, 3, 224, 224), device=inputs_embeds.device, dtype=inputs_embeds.dtype
+                )
+                image_features = self.get_image_features(fake_pixel_values)
+                inputs_embeds = inputs_embeds + 0 * image_features.mean()
             return inputs_embeds
 
         Gemma3ForConditionalGeneration.get_inputs_embeds = get_inputs_embeds
