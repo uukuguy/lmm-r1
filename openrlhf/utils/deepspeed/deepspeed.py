@@ -224,6 +224,7 @@ class DeepspeedStrategy(ABC):
             config=ds_config,
             args={"local_rank": int(os.environ.get("LOCAL_RANK", "-1"))},
             dist_init_required=True,
+            model_parameters=filter(lambda p: p.requires_grad, model.parameters()),
         )
         if self.deepcompile:
             engine.compile()
@@ -353,6 +354,11 @@ class DeepspeedStrategy(ABC):
             if getattr(model_to_save.config, "model_type", None) == "phi3_v" \
                   and "model.vision_embed_tokens.wte.weight" in state_dict_keys:
                 state_dict_keys.remove("model.vision_embed_tokens.wte.weight")
+
+            # corner case for gemma3
+            if getattr(model_to_save.config, "model_type", None) == "gemma3" \
+                and "language_model.lm_head.weight" in state_dict_keys:
+                state_dict_keys.remove("language_model.lm_head.weight")
 
             assert state_dict_keys.issubset(
                 output_state_dict_keys
