@@ -2,6 +2,7 @@ import json
 import os
 import random
 import re
+from tqdm import tqdm
 from argparse import ArgumentParser
 
 from flask import Flask, jsonify, request
@@ -88,7 +89,7 @@ def get_reward():
     rewards = []
     format_rewards = []
     acc_rewards_futures = []
-    for q, problem, answer in zip(data["query"], data["prompts"], data["labels"]):
+    for q, problem, answer in tqdm(zip(data["query"], data["prompts"], data["labels"]), desc="get_reward"):
         if problem is None:
             return jsonify({"error": f"problem not found from {q}"}), 400
         if not answer.startswith("$"):

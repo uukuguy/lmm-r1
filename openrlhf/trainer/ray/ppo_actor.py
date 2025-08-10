@@ -2,6 +2,7 @@ from contextlib import ExitStack
 import itertools
 import math
 import os
+import shutil
 import socket
 from abc import ABC
 from typing import Dict, List, Optional, Union
@@ -574,6 +575,45 @@ class ActorModelRayActor(BasePPORole):
     def offload_states(self):
         offload_deepspeed_states(self.actor.model)
 
+    def _cleanup_hf_checkpoints(self, ckpt_path, max_num, max_mem):
+        """Clean up old HF checkpoints to maintain max_num limit, similar to save_ckpt logic"""
+        if not self.strategy.is_rank_0():
+            return
+            
+        if not os.path.exists(ckpt_path):
+            return
+            
+        MAX_SIZE = max_mem * 1024**3  # Convert GB to bytes
+        
+        while True:
+            # Find all *_hf directories
+            hf_subdirs = sorted(
+                [
+                    (os.path.join(ckpt_path, d), os.path.getmtime(os.path.join(ckpt_path, d)))
+                    for d in os.listdir(ckpt_path)
+                    if os.path.isdir(os.path.join(ckpt_path, d)) and d.endswith("_hf")
+                ],
+                key=lambda x: x[1],  # Sort by modification time
+            )
+            
+            if not hf_subdirs:
+                break
+                
+            total_size = sum(
+                os.path.getsize(os.path.join(dirpath, f))
+                for subdir, _ in hf_subdirs
+                for dirpath, _, filenames in os.walk(subdir)
+                for f in filenames
+            )
+            
+            if len(hf_subdirs) >= max_num or total_size > MAX_SIZE:
+                oldest_dir = hf_subdirs[0][0]
+                if os.path.exists(oldest_dir):
+                    shutil.rmtree(oldest_dir)
+                    self.strategy.print(f"Deleted oldest HF ckpt {oldest_dir}")
+            else:
+                break
+
     def save_checkpoint(self, tag, client_states):
         args = self.strategy.args
         self.strategy.save_ckpt(
@@ -585,6 +625,9 @@ class ActorModelRayActor(BasePPORole):
             client_states,
         )
         if self.save_hf_ckpt:
+            # Clean up old HF checkpoints before saving new one
+            self._cleanup_hf_checkpoints(args.ckpt_path, args.max_ckpt_num, args.max_ckpt_mem)
+            
             save_path = os.path.join(args.ckpt_path, f"{tag}_hf")
             self.strategy.save_model(
                 self.ema_model if args.enable_ema else self.actor,
